@@ -17,6 +17,18 @@ from agents.archaeology_agent import analyze_history
 from agents.steelman_agent import steelman_hypothesis
 from agents.verdict_agent import evaluate_verdict
 
+def get_outcome_display(outcome: str) -> str:
+    out_lower = outcome.strip().lower()
+    if out_lower == 'failed':
+        return "✕ Failed"
+    elif out_lower == 'success':
+        return "✓ Success"
+    elif out_lower == 'proposed':
+        return "○ Proposed"
+    elif out_lower == 'abandoned':
+        return "— Abandoned"
+    return outcome
+
 # Page configuration
 st.set_page_config(
     page_title="Hypothesis Graveyard",
@@ -24,6 +36,18 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Programmatic tab switching logic using session state and client-side JS
+if st.session_state.get("active_tab") == "Analysis Sandbox":
+    st.components.v1.html("""
+        <script>
+            const tabButtons = window.parent.document.querySelectorAll('.stTabs [data-baseweb="tab"]');
+            if (tabButtons && tabButtons.length > 0) {
+                tabButtons[0].click();
+            }
+        </script>
+    """, height=0, width=0)
+    st.session_state.active_tab = None
 
 # API Key resolution logic
 if "gemini_api_key" in st.session_state and st.session_state.gemini_api_key:
@@ -335,6 +359,28 @@ st.markdown("""
             margin-bottom: 4px !important;
         }
     }
+    
+    /* Style back links as simple text links */
+    .st-key-back_to_analysis_browser button, .st-key-back_to_analysis_map button {
+        background: transparent !important;
+        border: none !important;
+        color: #60a5fa !important;
+        text-decoration: underline !important;
+        padding: 0 !important;
+        font-size: 0.95rem !important;
+        font-weight: 500 !important;
+        box-shadow: none !important;
+        display: inline-block !important;
+        margin-bottom: 1.5rem !important;
+        cursor: pointer !important;
+        text-align: left !important;
+    }
+    .st-key-back_to_analysis_browser button:hover, .st-key-back_to_analysis_map button:hover {
+        color: #a78bfa !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -426,6 +472,7 @@ with st.sidebar:
                 outcome_counts = df_stats['outcome'].value_counts()
                 st.markdown("**Outcomes**")
                 for out, cnt in outcome_counts.items():
+                    display_out = get_outcome_display(out)
                     out_l = out.lower()
                     color = "#9ca3af"
                     if out_l == 'success':
@@ -434,7 +481,7 @@ with st.sidebar:
                         color = "#ef4444"
                     elif out_l == 'proposed':
                         color = "#f59e0b"
-                    st.markdown(f"<div style='font-size: 0.85rem; padding: 2px 0;'><span style='color: {color}; margin-right: 6px;'>●</span>{out}: {cnt}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 0.85rem; padding: 2px 0;'><span style='color: {color}; margin-right: 6px;'>●</span>{display_out}: {cnt}</div>", unsafe_allow_html=True)
                     
             # Avg conviction
             if 'conviction_score' in df_stats.columns:
@@ -568,15 +615,33 @@ with tab_sandbox:
             unsafe_allow_html=True
         )
         
-        with st.form("hypothesis_form"):
+        is_analyzing = st.session_state.get("is_analyzing", False)
+        
+        if is_analyzing:
             st.markdown("<div style='font-size: 0.85rem; color: #94a3b8; font-weight: 600; margin-bottom: 8px;'>Describe your hypothesis</div>", unsafe_allow_html=True)
-            raw_text = st.text_area(
+            st.text_area(
                 "Describe your hypothesis:",
+                value=st.session_state.get("raw_text", ""),
                 label_visibility="collapsed",
-                placeholder="e.g., We should use a multi-head attention mechanism on 1-minute order book imbalances to predict price direction because...",
+                disabled=True,
                 height=180
             )
             
+            # Cancel Analysis button
+            if st.button("Cancel Analysis", use_container_width=True, type="primary"):
+                st.session_state.is_analyzing = False
+                st.session_state.analysis_completed = False
+                st.session_state.raw_text = ""
+                st.session_state.captured_hyp = None
+                st.session_state.archaeology_rep = None
+                st.session_state.steelman_rep = None
+                st.session_state.verdict_rep = None
+                st.session_state.buried = False
+                st.session_state.start_pipeline = False
+                if "dejavu_alert" in st.session_state:
+                    del st.session_state["dejavu_alert"]
+                st.rerun()
+                
             # Agent descriptions expander
             with st.expander("ℹ️ How it works", expanded=False):
                 st.markdown("""
@@ -586,64 +651,103 @@ with tab_sandbox:
                 * **⚖️ Verdict Agent** — Delivers a conviction score (0-100) and tells you whether to proceed, revise, or abandon.
                 """)
                 
-            submitted = st.form_submit_button("Analyze Hypothesis", use_container_width=True)
-            
-        if submitted:
-            if not raw_text.strip():
-                st.error("Please enter a hypothesis description.")
-            elif not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "your_key_here":
-                st.error("Please set a valid GEMINI_API_KEY in the sidebar or .env file.")
-            else:
-                st.session_state.raw_text = raw_text
-                st.session_state.analysis_completed = False
-                st.session_state.buried = False
-                if "dejavu_alert" in st.session_state:
-                    del st.session_state["dejavu_alert"]
-                
-                try:
-                    render_empty_state(results_placeholder, "capture")
-                    captured_hyp = capture_hypothesis(raw_text)
-                    st.session_state.captured_hyp = captured_hyp
-                    
-                    render_empty_state(results_placeholder, "archaeology")
-                    archaeology_rep = analyze_history(captured_hyp)
-                    st.session_state.archaeology_rep = archaeology_rep
-                    
-                    # Deja Vu Alert check (similarity > 85%)
-                    query_text = f"{captured_hyp.core_idea} {captured_hyp.rationale}"
-                    similar_cases = graveyard.search_similar(query_text, n=3)
-                    dejavu_found = False
-                    highest_sim = 0.0
-                    matched_case = None
-                    for case in similar_cases:
-                        dist = case.get('distance', 2.0)
-                        if dist is None: dist = 2.0
-                        sim = (1.0 - (dist / 2.0)) * 100
-                        if sim > 85.0 and sim > highest_sim:
-                            highest_sim = sim
-                            matched_case = case
-                            dejavu_found = True
-                    if dejavu_found:
-                        st.session_state.dejavu_alert = {
-                            "title": matched_case['text'],
-                            "outcome": matched_case['metadata'].get('outcome', 'Unknown'),
-                            "similarity": highest_sim,
-                            "contributor": matched_case['metadata'].get('contributor', 'Anonymous'),
-                            "date": matched_case['metadata'].get('date', 'Unknown Date')
-                        }
+            # Run the agent pipeline if not completed
+            if not st.session_state.get("analysis_completed", False):
+                if st.session_state.get("start_pipeline", False):
+                    try:
+                        render_empty_state(results_placeholder, "capture")
+                        captured_hyp = capture_hypothesis(st.session_state.raw_text)
+                        st.session_state.captured_hyp = captured_hyp
                         
-                    render_empty_state(results_placeholder, "steelman")
-                    steelman_rep = steelman_hypothesis(captured_hyp, archaeology_rep)
-                    st.session_state.steelman_rep = steelman_rep
-                    
-                    render_empty_state(results_placeholder, "verdict")
-                    verdict_rep = evaluate_verdict(captured_hyp, archaeology_rep, steelman_rep)
-                    st.session_state.verdict_rep = verdict_rep
-                    
-                    st.session_state.analysis_completed = True
+                        render_empty_state(results_placeholder, "archaeology")
+                        archaeology_rep = analyze_history(captured_hyp)
+                        st.session_state.archaeology_rep = archaeology_rep
+                        
+                        # Deja Vu Alert check (similarity > 85%)
+                        query_text = f"{captured_hyp.core_idea} {captured_hyp.rationale}"
+                        similar_cases = graveyard.search_similar(query_text, n=3)
+                        dejavu_found = False
+                        highest_sim = 0.0
+                        matched_case = None
+                        for case in similar_cases:
+                            dist = case.get('distance', 2.0)
+                            if dist is None: dist = 2.0
+                            sim = (1.0 - (dist / 2.0)) * 100
+                            if sim > 85.0 and sim > highest_sim:
+                                highest_sim = sim
+                                matched_case = case
+                                dejavu_found = True
+                        if dejavu_found:
+                            st.session_state.dejavu_alert = {
+                                "title": matched_case['text'],
+                                "outcome": matched_case['metadata'].get('outcome', 'Unknown'),
+                                "similarity": highest_sim,
+                                "contributor": matched_case['metadata'].get('contributor', 'Anonymous'),
+                                "date": matched_case['metadata'].get('date', 'Unknown Date')
+                            }
+                            
+                        render_empty_state(results_placeholder, "steelman")
+                        steelman_rep = steelman_hypothesis(captured_hyp, archaeology_rep)
+                        st.session_state.steelman_rep = steelman_rep
+                        
+                        render_empty_state(results_placeholder, "verdict")
+                        verdict_rep = evaluate_verdict(captured_hyp, archaeology_rep, steelman_rep)
+                        st.session_state.verdict_rep = verdict_rep
+                        
+                        st.session_state.analysis_completed = True
+                        st.session_state.is_analyzing = False
+                        st.session_state.start_pipeline = False
+                        st.rerun()
+                    except Exception as e:
+                        if type(e).__name__ in ["RerunException", "StopException"]:
+                            raise e
+                        st.error(f"Error running pipeline: {e}")
+                        st.session_state.is_analyzing = False
+                        st.session_state.start_pipeline = False
+                else:
+                    render_empty_state(results_placeholder)
+                    st.session_state.start_pipeline = True
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error running pipeline: {e}")
+        else:
+            with st.form("hypothesis_form"):
+                st.markdown("<div style='font-size: 0.85rem; color: #94a3b8; font-weight: 600; margin-bottom: 8px;'>Describe your hypothesis</div>", unsafe_allow_html=True)
+                raw_text = st.text_area(
+                    "Describe your hypothesis:",
+                    value=st.session_state.get("raw_text", ""),
+                    label_visibility="collapsed",
+                    placeholder="e.g., We should use a multi-head attention mechanism on 1-minute order book imbalances to predict price direction because...",
+                    height=180
+                )
+                
+                # Agent descriptions expander
+                with st.expander("ℹ️ How it works", expanded=False):
+                    st.markdown("""
+                    * **🕵️ Capture Agent** — Understands and structures your hypothesis.
+                    * **🏛️ Archaeology Agent** — Searches institutional memory for similar past attempts and their outcomes.
+                    * **🛡️ Steelman Agent** — Builds the strongest possible version of your hypothesis using current evidence.
+                    * **⚖️ Verdict Agent** — Delivers a conviction score (0-100) and tells you whether to proceed, revise, or abandon.
+                    """)
+                    
+                submitted = st.form_submit_button("Analyze Hypothesis", use_container_width=True)
+                
+            if submitted:
+                if not raw_text.strip():
+                    st.error("Please enter a hypothesis description.")
+                elif not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "your_key_here":
+                    st.error("Please set a valid GEMINI_API_KEY in the sidebar or .env file.")
+                else:
+                    st.session_state.raw_text = raw_text
+                    st.session_state.is_analyzing = True
+                    st.session_state.analysis_completed = False
+                    st.session_state.buried = False
+                    st.session_state.captured_hyp = None
+                    st.session_state.archaeology_rep = None
+                    st.session_state.steelman_rep = None
+                    st.session_state.verdict_rep = None
+                    st.session_state.start_pipeline = False
+                    if "dejavu_alert" in st.session_state:
+                        del st.session_state["dejavu_alert"]
+                    st.rerun()
                     
     with col_results:
         # Display Deja Vu Alert
@@ -654,7 +758,7 @@ with tab_sandbox:
                 <div style='color: #f87171; font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;'>⚠️ DÉJÀ VU DETECTED — {alert['contributor']} already tested this on {alert['date']}</div>
                 <div style='color: #fca5a5; font-size: 0.9rem; font-weight: 500;'>Matched Hypothesis:</div>
                 <div style='color: #fca5a5; font-size: 1.05rem; font-weight: 600; margin-top: 0.5rem; line-height: 1.4;'>"{alert['title']}"</div>
-                <div style='font-size: 1.15rem; color: #ef4444; font-weight: 800; margin-top: 0.5rem;'>Outcome: {alert['outcome']} | Similarity: {alert['similarity']:.1f}%</div>
+                <div style='font-size: 1.15rem; color: #ef4444; font-weight: 800; margin-top: 0.5rem;'>Outcome: {get_outcome_display(alert['outcome'])} | Similarity: {alert['similarity']:.1f}%</div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -713,7 +817,16 @@ with tab_sandbox:
                 if arch.similar_cases_found:
                     st.markdown("##### Similar Past Cases Analyzed")
                     for case in arch.similar_cases_found:
-                        out_badge = f'<span class="badge badge-success">{case.outcome}</span>' if case.outcome.lower() == 'success' else f'<span class="badge badge-failed">{case.outcome}</span>'
+                        out_lower = case.outcome.lower()
+                        if out_lower == 'success':
+                            out_class = "badge-success"
+                        elif out_lower == 'failed':
+                            out_class = "badge-failed"
+                        elif out_lower == 'proposed':
+                            out_class = "badge-proposed"
+                        else:
+                            out_class = "badge-abandoned"
+                        out_badge = f'<span class="badge {out_class}">{get_outcome_display(case.outcome)}</span>'
                         st.markdown(f"""
                         <div class="hypothesis-card">
                             <div>{out_badge} <strong>Score: {case.conviction_score:.0f}/100</strong></div>
@@ -749,7 +862,7 @@ with tab_sandbox:
                 with st.form("bury_form"):
                     col_b1, col_b2, col_b3 = st.columns(3)
                     with col_b1:
-                        outcome_opt = st.selectbox("Outcome:", ["Proposed", "Failed", "Success", "Abandoned"])
+                        outcome_opt = st.selectbox("Outcome:", ["○ Proposed", "✕ Failed", "✓ Success", "— Abandoned"])
                     with col_b2:
                         final_score = st.slider("Adjust Conviction Score:", 0, 100, int(score))
                     with col_b3:
@@ -764,7 +877,7 @@ with tab_sandbox:
                             doc_id = graveyard.store_hypothesis(
                                 text=st.session_state.raw_text,
                                 domain=chyp.domain,
-                                outcome=outcome_opt,
+                                outcome=outcome_opt.split(" ", 1)[-1],
                                 conviction_score=float(final_score),
                                 notes=notes_opt,
                                 contributor=contributor_opt.strip() if contributor_opt.strip() else "Anonymous"
@@ -774,11 +887,16 @@ with tab_sandbox:
                         except Exception as e:
                             st.error(f"Failed to bury: {e}")
         else:
-            render_empty_state(results_placeholder)
+            if not st.session_state.get("is_analyzing", False):
+                render_empty_state(results_placeholder)
 
 
 # PAGE 2: BROWSE GRAVEYARD
 with tab_browser:
+    if st.button("← Back to Analysis", key="back_to_analysis_browser"):
+        st.session_state.active_tab = "Analysis Sandbox"
+        st.rerun()
+        
     if "search_query" not in st.session_state:
         st.session_state.search_query = ""
         
@@ -887,7 +1005,7 @@ with tab_browser:
                         <div class="hypothesis-card {border_class}" style="margin-bottom: 0;">
                             <div>
                                 <span class="badge {dom_class}">{row['domain']}</span>
-                                <span class="badge {out_class}">{row['outcome']}</span>
+                                <span class="badge {out_class}">{get_outcome_display(row['outcome'])}</span>
                             </div>
                             <p style="font-size: 1.15rem; font-weight: 600; margin-top: 0.5rem; margin-bottom: 0.5rem; color: #f3f4f6;">"{row['text']}"</p>
                             <div style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 0.8rem;">
@@ -919,6 +1037,10 @@ with tab_browser:
 
 # PAGE 3: GRAVEYARD MAP
 with tab_map:
+    if st.button("← Back to Analysis", key="back_to_analysis_map"):
+        st.session_state.active_tab = "Analysis Sandbox"
+        st.rerun()
+        
     st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-bottom: 1.5rem;'>Visualizing relationships between hypotheses. Nodes represent hypotheses, and edges represent embedding similarity > 70%.</p>", unsafe_allow_html=True)
     
     try:
@@ -983,10 +1105,11 @@ with tab_map:
             
             # Build nodes trace categorized by outcome to support fixed color strings per trace
             traces_data = {
-                'failed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#E74C3C', 'name': 'Failed'},
-                'success': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#2ECC71', 'name': 'Success'},
-                'proposed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#F39C12', 'name': 'Proposed'},
-                'other': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#7F8C8D', 'name': 'Other'}
+                'failed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#E74C3C', 'name': '✕ Failed'},
+                'success': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#2ECC71', 'name': '✓ Success'},
+                'proposed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#F39C12', 'name': '○ Proposed'},
+                'abandoned': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#7F8C8D', 'name': '— Abandoned'},
+                'other': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#9CA3AF', 'name': 'Other'}
             }
             
             for node in G.nodes():
@@ -1002,6 +1125,8 @@ with tab_map:
                     cat = 'success'
                 elif outcome == 'proposed':
                     cat = 'proposed'
+                elif outcome == 'abandoned':
+                    cat = 'abandoned'
                 else:
                     cat = 'other'
                     
@@ -1073,9 +1198,10 @@ with tab_map:
             with col_graph:
                 st.markdown(
                     "<div style='display: flex; gap: 1.2rem; justify-content: flex-start; align-items: center; font-size: 0.9rem; color: #9ca3af; padding-top: 5px; margin-bottom: 10px;'>"
-                    "<span>🔴 Failed</span>"
-                    "<span>🟢 Success</span>"
-                    "<span>🟡 Proposed</span>"
+                    "<span>🔴 ✕ Failed</span>"
+                    "<span>🟢 ✓ Success</span>"
+                    "<span>🟡 ○ Proposed</span>"
+                    "<span>⚫ — Abandoned</span>"
                     "<span style='border-left: 1px solid #374151; padding-left: 1.2rem; font-style: italic;'>Node size scales with score</span>"
                     "</div>",
                     unsafe_allow_html=True
@@ -1106,7 +1232,7 @@ with tab_map:
                 if current_selected and current_selected in id_to_record:
                     rec = id_to_record[current_selected]
                     
-                    st.markdown(f"#### {rec['outcome']} | {rec['domain']}")
+                    st.markdown(f"#### {get_outcome_display(rec['outcome'])} | {rec['domain']}")
                     
                     col_score_m, col_score_p = st.columns([2, 3])
                     with col_score_m:

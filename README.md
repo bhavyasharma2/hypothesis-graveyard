@@ -8,13 +8,15 @@
 
 ## The Problem
 
-Every team that tests ideas faces the same invisible problem.
+Knowledge-intensive teams have a memory problem.
 
-A quant researcher spends three weeks backtesting a signal. It fails. They write a note and move on. A few months later, a new teammate proposes the exact same signal. Nobody remembered. Three more weeks. Same wall.
+A hypothesis gets tested. It fails. The lessons get buried in a closed ticket, a forgotten notebook, a Slack thread nobody scrolls back to. The person who ran the experiment moves on. The knowledge moves with them.
 
-This happens in quant finance, ML research, software engineering, and data science teams constantly. The knowledge exists. It just lives nowhere useful.
+Six months later, someone new proposes the same idea. The team has no way to know it was already tried. No way to know why it failed. No way to surface the two weeks of work that already answered this exact question.
 
-Wikis go stale. Postmortem docs go unsearched. Search bars find keywords not meaning. Two people can describe the exact same idea in completely different words and a search returns nothing.
+This cycle repeats constantly across quant finance teams, ML research labs, data science orgs, and software engineering teams everywhere. The cost is not just time. It is the compounding loss of every lesson a team ever learned, silently draining the organization of its own hard-won experience.
+
+The tools that exist today do not solve this. Wikis require someone to maintain them. Search bars find keywords not meaning. Postmortem docs sit unread until after the mistake is already made.
 
 **Hypothesis Graveyard fixes that.**
 

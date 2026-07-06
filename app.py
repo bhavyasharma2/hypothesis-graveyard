@@ -625,7 +625,7 @@ with tab_sandbox:
                         archaeology_rep = analyze_history(captured_hyp)
                         st.session_state.archaeology_rep = archaeology_rep
                         
-                        # Deja Vu Alert check (similarity > 85%)
+                        # Deja Vu Alert check (similarity > 73%)
                         query_text = f"{captured_hyp.core_idea} {captured_hyp.rationale}"
                         similar_cases = graveyard.search_similar(query_text, n=3)
                         dejavu_found = False
@@ -635,7 +635,7 @@ with tab_sandbox:
                             dist = case.get('distance', 2.0)
                             if dist is None: dist = 2.0
                             sim = (1.0 - (dist / 2.0)) * 100
-                            if sim > 85.0 and sim > highest_sim:
+                            if sim > 73.0 and sim > highest_sim:
                                 highest_sim = sim
                                 matched_case = case
                                 dejavu_found = True
@@ -717,7 +717,7 @@ with tab_sandbox:
             alert = st.session_state.dejavu_alert
             st.markdown(f"""
             <div style='background-color: rgba(239, 68, 68, 0.12); border: 2px solid #ef4444; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: center;'>
-                <div style='color: #f87171; font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;'>⚠️ DÉJÀ VU DETECTED — {alert['contributor']} already tested this on {alert['date']}</div>
+                <div style='color: #f87171; font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;'>⚠️ DÉJÀ VU DETECTED (similarity exceeds 73%) — {alert['contributor']} already tested this on {alert['date']}</div>
                 <div style='color: #fca5a5; font-size: 0.9rem; font-weight: 500;'>Matched Hypothesis:</div>
                 <div style='color: #fca5a5; font-size: 1.05rem; font-weight: 600; margin-top: 0.5rem; line-height: 1.4;'>"{alert['title']}"</div>
                 <div style='font-size: 1.15rem; color: #ef4444; font-weight: 800; margin-top: 0.5rem;'>Outcome: {get_outcome_display(alert['outcome'])} | Similarity: {alert['similarity']:.1f}%</div>

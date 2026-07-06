@@ -59,7 +59,7 @@ ChromaDB Vector Store ◄──── Graveyard grows, system gets smarter
 ## Key Features
 
 ### Deja Vu Alert
-Fires instantly when a new hypothesis exceeds 85% similarity to a past attempt. Shows who tested it, when, and what happened — before the full analysis even completes.
+Fires instantly when a new hypothesis similarity exceeds 73% of a past attempt. Shows who tested it, when, and what happened — before the full analysis even completes.
 
 ### Semantic Paraphrase Detection
 The system catches ideas, not keywords. During testing, two completely differently worded hypotheses about the same concept matched at 96% similarity with zero shared words.

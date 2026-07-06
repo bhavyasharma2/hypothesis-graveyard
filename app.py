@@ -50,14 +50,13 @@ if st.session_state.get("active_tab") == "Analysis Sandbox":
     st.session_state.active_tab = None
 
 # API Key resolution logic
-if "gemini_api_key" in st.session_state and st.session_state.gemini_api_key:
-    os.environ["GEMINI_API_KEY"] = st.session_state.gemini_api_key
+load_dotenv(override=True)
+env_key = os.getenv("GEMINI_API_KEY", "").strip()
+if not env_key or env_key == "your_key_here":
+    st.error("Please add your GEMINI_API_KEY to the .env file. See README for instructions.")
+    st.stop()
 else:
-    load_dotenv()
-    env_key = os.getenv("GEMINI_API_KEY", "")
-    if env_key and env_key != "your_key_here":
-        st.session_state.gemini_api_key = env_key
-        os.environ["GEMINI_API_KEY"] = env_key
+    os.environ["GEMINI_API_KEY"] = env_key
 
 # Custom CSS for premium dark-mode styling with purple/blue gradients
 st.markdown("""
@@ -391,65 +390,28 @@ except Exception:
     db_count = 0
 
 if db_count == 0:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key == "your_key_here":
-        st.warning("⚠️ Graveyard database is empty. Please configure a valid Gemini API Key in the sidebar expander to automatically seed the database with 20 historical hypotheses.")
-        
-        # Render clean sidebar with expanded key config so they see it immediately
-        with st.sidebar:
-            st.markdown("## ⚙️ Configuration")
-            api_key_input = st.text_input("Enter your Gemini API Key", type="password", help="Needed to run embeddings and agents.")
-            if api_key_input:
-                st.session_state.gemini_api_key = api_key_input
-                os.environ["GEMINI_API_KEY"] = api_key_input
-                st.rerun()
-        st.stop()
-    else:
-        # Show seeding spinner
-        with st.spinner("🌱 Initializing Hypothesis Graveyard with historical data..."):
-            try:
-                from seed import SEED_HYPOTHESES
-                for hyp in SEED_HYPOTHESES:
-                    graveyard.store_hypothesis(
-                        text=hyp["text"],
-                        domain=hyp["domain"],
-                        outcome=hyp["outcome"],
-                        conviction_score=hyp["conviction_score"],
-                        notes=hyp["notes"],
-                        contributor=hyp.get("contributor", "Anonymous"),
-                        date=hyp.get("date")
-                    )
-                st.success("🌱 Graveyard initialized successfully!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to seed database: {e}")
-                st.stop()
+    # Show seeding spinner
+    with st.spinner("🌱 Initializing Hypothesis Graveyard with historical data..."):
+        try:
+            from seed import SEED_HYPOTHESES
+            for hyp in SEED_HYPOTHESES:
+                graveyard.store_hypothesis(
+                    text=hyp["text"],
+                    domain=hyp["domain"],
+                    outcome=hyp["outcome"],
+                    conviction_score=hyp["conviction_score"],
+                    notes=hyp["notes"],
+                    contributor=hyp.get("contributor", "Anonymous"),
+                    date=hyp.get("date")
+                )
+            st.success("🌱 Graveyard initialized successfully!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to seed database: {e}")
+            st.stop()
 
-# ----------------- SIDEBAR LAYOUT (Configuration Expander & Stats) -----------------
+# ----------------- SIDEBAR LAYOUT (Stats Only) -----------------
 with st.sidebar:
-    st.markdown("## ⚙️ Configuration")
-    current_key = st.session_state.get("gemini_api_key", "")
-    
-    if current_key and current_key != "your_key_here":
-        st.success("✅ API Key accepted")
-        new_key = st.text_input("Enter your Gemini API Key", value=current_key, type="password", help="Needed to run embeddings and agents.")
-        if new_key != current_key:
-            st.session_state.gemini_api_key = new_key
-            os.environ["GEMINI_API_KEY"] = new_key
-            st.rerun()
-            
-        if st.button("Clear / Reset Key"):
-            st.session_state.gemini_api_key = ""
-            os.environ["GEMINI_API_KEY"] = ""
-            st.rerun()
-    else:
-        api_key_input = st.text_input("Enter your Gemini API Key", type="password", help="Needed to run embeddings and agents.")
-        if api_key_input:
-            st.session_state.gemini_api_key = api_key_input
-            os.environ["GEMINI_API_KEY"] = api_key_input
-            st.rerun()
-                
-    st.markdown("---")
     st.markdown("## 📊 Graveyard Statistics")
     
     try:
@@ -734,7 +696,7 @@ with tab_sandbox:
                 if not raw_text.strip():
                     st.error("Please enter a hypothesis description.")
                 elif not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "your_key_here":
-                    st.error("Please set a valid GEMINI_API_KEY in the sidebar or .env file.")
+                    st.error("Please add your GEMINI_API_KEY to the .env file. See README for instructions.")
                 else:
                     st.session_state.raw_text = raw_text
                     st.session_state.is_analyzing = True
@@ -1041,7 +1003,7 @@ with tab_map:
         st.session_state.active_tab = "Analysis Sandbox"
         st.rerun()
         
-    st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-bottom: 1.5rem;'>Visualizing relationships between hypotheses. Nodes represent hypotheses, and edges represent embedding similarity > 70%.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-bottom: 1.5rem;'>Visualizing relationships between hypotheses. Nodes represent hypotheses, and edges represent embedding similarity > 50%.</p>", unsafe_allow_html=True)
     
     try:
         data = graveyard.collection.get(include=['embeddings', 'documents', 'metadatas'])
@@ -1076,12 +1038,15 @@ with tab_map:
                 
             # Embeddings similarities
             embeddings = np.array(data['embeddings'])
-            sim_matrix = np.dot(embeddings, embeddings.T)
-            
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            normalized = embeddings / norms
+            sim_matrix = np.dot(normalized, normalized.T)
+
             for i in range(num_nodes):
                 for j in range(i + 1, num_nodes):
                     sim = float(sim_matrix[i, j])
-                    if sim > 0.70:
+                    if sim > 0.50:
                         G.add_edge(data['ids'][i], data['ids'][j])
             
             # Compute layouts
@@ -1105,10 +1070,10 @@ with tab_map:
             
             # Build nodes trace categorized by outcome to support fixed color strings per trace
             traces_data = {
-                'failed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#E74C3C', 'name': '✕ Failed'},
-                'success': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#2ECC71', 'name': '✓ Success'},
-                'proposed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#F39C12', 'name': '○ Proposed'},
-                'abandoned': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#7F8C8D', 'name': '— Abandoned'},
+                'failed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#D55E00', 'name': '✕ Failed'},
+                'success': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#009E73', 'name': '✓ Success'},
+                'proposed': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#E69F00', 'name': '○ Proposed'},
+                'abandoned': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#999999', 'name': '— Abandoned'},
                 'other': {'x': [], 'y': [], 'size': [], 'text': [], 'border_color': [], 'border_width': [], 'opacity': [], 'ids': [], 'color': '#9CA3AF', 'name': 'Other'}
             }
             
@@ -1198,10 +1163,10 @@ with tab_map:
             with col_graph:
                 st.markdown(
                     "<div style='display: flex; gap: 1.2rem; justify-content: flex-start; align-items: center; font-size: 0.9rem; color: #9ca3af; padding-top: 5px; margin-bottom: 10px;'>"
-                    "<span>🔴 ✕ Failed</span>"
-                    "<span>🟢 ✓ Success</span>"
-                    "<span>🟡 ○ Proposed</span>"
-                    "<span>⚫ — Abandoned</span>"
+                    "<span style='color: #D55E00;'>● ✕ Failed</span>"
+                    "<span style='color: #009E73;'>● ✓ Success</span>"
+                    "<span style='color: #E69F00;'>● ○ Proposed</span>"
+                    "<span style='color: #999999;'>● — Abandoned</span>"
                     "<span style='border-left: 1px solid #374151; padding-left: 1.2rem; font-style: italic;'>Node size scales with score</span>"
                     "</div>",
                     unsafe_allow_html=True

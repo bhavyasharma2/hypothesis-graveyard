@@ -107,6 +107,8 @@ Wong color blind safe palette on all visualizations. Symbol plus color outcome i
 
 A comprehensive end-to-end walkthrough demonstrating every feature, workflow, and capability of the project in detail: https://drive.google.com/file/d/1ALg2CegzKpAhV6pipoxmCmuMPkopb9Yg/view?usp=sharing
 
+---
+
 ## Setup Instructions
 
 ### Prerequisites
